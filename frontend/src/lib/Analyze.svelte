@@ -298,7 +298,7 @@
   }
 
   function navigateBreadcrumb(path) {
-    drillRequestId++;
+    // Don't increment drillRequestId here — let drillDown manage it
     CancelAnalyzeDrill();
     drillLoading = false;
     drillDown({ path, isDir: true, children: null });
@@ -307,7 +307,9 @@
   function goBack() {
     if (breadcrumbs.length > 1) {
       const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
-      navigateBreadcrumb(parentCrumb.path);
+      CancelAnalyzeDrill();
+      drillLoading = false;
+      drillDown({ path: parentCrumb.path, isDir: true, children: null });
     }
   }
 
@@ -540,17 +542,19 @@
       <!-- LEFT PANEL: file list -->
       <div class="left-panel">
         <div class="panel-header">
-          <span class="panel-title">
-            {listItems.length} items &middot; {formatBytes(totalCurrentSize)}
-          </span>
+          <div class="panel-header-left">
+            {#if breadcrumbs.length > 1}
+              <button class="btn-back" on:click={goBack}>&#8592; Back</button>
+            {/if}
+            <span class="panel-title">
+              {listItems.length} items &middot; {formatBytes(totalCurrentSize)}
+            </span>
+          </div>
           <select class="sort-select" bind:value={sortBy}>
             <option value="size">Size</option>
             <option value="name">Name</option>
             <option value="date">Date</option>
           </select>
-          {#if breadcrumbs.length > 1}
-            <button class="btn-back" on:click={goBack}>&#8592; Back</button>
-          {/if}
         </div>
 
         <div class="file-list">
@@ -859,6 +863,13 @@
     font-size: 12px; font-weight: 600; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.5px;
   }
+  .panel-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
   .panel-subtitle {
     font-size: 11px; color: var(--text-muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;
@@ -934,12 +945,12 @@
   .drill-arrow { font-size: 10px; color: var(--text-muted); }
 
   .inline-delete {
-    background: none; color: var(--text-muted);
-    font-size: 14px; padding: 6px 8px; border-radius: 6px;
+    background: none; color: var(--red);
+    font-size: 15px; padding: 6px 8px; border-radius: 6px;
     opacity: 0; transition: all var(--transition); flex-shrink: 0;
   }
-  .file-row:hover .inline-delete { opacity: 1; }
-  .inline-delete:hover { color: var(--red); background: var(--red-dim); }
+  .file-row:hover .inline-delete { opacity: 0.7; }
+  .inline-delete:hover { opacity: 1; color: #ff4444; background: var(--red-dim); }
 
   .panel-footer {
     display: flex; align-items: center; justify-content: space-between;

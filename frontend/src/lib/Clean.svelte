@@ -410,8 +410,7 @@
 
   function getListItems(_v, _sort) {
     if (currentView === 'root') {
-      // Categories always sorted by size, no user sort applied
-      return (result?.categories || []).map((cat, i) => ({
+      const mapped = (result?.categories || []).map((cat, i) => ({
         name: cat.name,
         size: cat.size,
         path: '__cat__' + i,
@@ -421,6 +420,7 @@
         isCategoryRow: true,
         catIndex: i,
       }));
+      return sortItems(mapped, sortBy);
     }
     if (currentView === 'category' && currentCatIndex >= 0) {
       const cat = result.categories[currentCatIndex];
@@ -707,34 +707,32 @@
       <!-- LEFT PANEL: file list -->
       <div class="left-panel">
         <div class="panel-header">
-          <span class="panel-title">
-            {#if currentView === 'root'}
-              {result.categories.length} Categories &middot; {formatBytes(result.totalSize)}
-            {:else if currentView === 'category' && result.categories[currentCatIndex]}
-              {listItems.length} items in {result.categories[currentCatIndex].name}
-            {:else}
-              {listItems.length} items
+          <div class="panel-header-left">
+            {#if currentView !== 'root'}
+              <button class="btn-back" on:click={() => {
+                if (breadcrumbs.length > 1) {
+                  const parentIndex = breadcrumbs.length - 2;
+                  navigateBreadcrumb(parentIndex);
+                } else {
+                  goToRoot();
+                }
+              }}>&#8592; Back</button>
             {/if}
-          </span>
-          {#if currentView !== 'root'}
-            <select class="sort-select" bind:value={sortBy}>
-              <option value="size">Size</option>
-              <option value="name">Name</option>
-              <option value="date">Date</option>
-            </select>
-            <button class="btn-back" on:click={() => {
-              if (breadcrumbs.length > 1) {
-                // Navigate to parent breadcrumb; for item crumbs, find the nearest
-                // category or previous item level
-                const parentIndex = breadcrumbs.length - 2;
-                navigateBreadcrumb(parentIndex);
-              } else if (breadcrumbs.length === 1 && breadcrumbs[0].type === 'category') {
-                goToRoot();
-              } else {
-                goToRoot();
-              }
-            }}>&#8592; Back</button>
-          {/if}
+            <span class="panel-title">
+              {#if currentView === 'root'}
+                {result.categories.length} Categories &middot; {formatBytes(result.totalSize)}
+              {:else if currentView === 'category' && result.categories[currentCatIndex]}
+                {listItems.length} items in {result.categories[currentCatIndex].name}
+              {:else}
+                {listItems.length} items
+              {/if}
+            </span>
+          </div>
+          <select class="sort-select" bind:value={sortBy}>
+            <option value="size">Size</option>
+            <option value="name">Name</option>
+            <option value="date">Date</option>
+          </select>
         </div>
 
         <div class="file-list">
@@ -1038,6 +1036,13 @@
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
+  .panel-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
   .panel-title {
     font-size: 12px; font-weight: 600; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.5px;
@@ -1127,13 +1132,13 @@
   .drill-arrow { font-size: 10px; color: var(--text-muted); }
 
   .inline-delete {
-    background: none; color: var(--text-muted);
-    font-size: 14px; padding: 6px 8px; border-radius: 6px;
+    background: none; color: var(--red);
+    font-size: 15px; padding: 6px 8px; border-radius: 6px;
     opacity: 0; transition: all var(--transition);
     flex-shrink: 0;
   }
-  .file-row:hover .inline-delete { opacity: 1; }
-  .inline-delete:hover { color: var(--red); background: var(--red-dim); }
+  .file-row:hover .inline-delete { opacity: 0.7; }
+  .inline-delete:hover { opacity: 1; color: #ff4444; background: var(--red-dim); }
 
   .risk-badge {
     font-size: 9px; font-weight: 700; padding: 2px 6px;
