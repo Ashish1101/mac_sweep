@@ -305,14 +305,20 @@
     if (segment.type === 'category') {
       drillIntoCategory(segment.index);
     } else if (segment.isDir) {
-      // Drill into directory
+      // Drill into directory — try index-based lookup first, then fallback to path
       let item;
       if (segment.type === 'item' && currentCatIndex >= 0) {
         item = result.categories[currentCatIndex].items[segment.index];
       } else if (segment.type === 'leaf') {
         item = currentItems[segment.index];
       }
-      if (item) drillIntoItem(item);
+
+      if (item) {
+        drillIntoItem(item);
+      } else if (segment.path) {
+        // Outer ring arcs or untyped segments — drill using path directly
+        drillIntoItem({ path: segment.path, isDir: true, name: segment.label || segment.path.split('/').pop(), size: segment.size, children: null });
+      }
     } else if (segment.path) {
       // File: toggle selection via checkbox
       toggleSelect(segment.path, segment.size, segment.label);
@@ -463,6 +469,16 @@
   }
 
   // --- Cleanup ---
+  function openDeleteConfirm(path, info) {
+    // Reset cleaning flag so a previous in-flight delete doesn't block the new modal
+    cleaning = false;
+    if (path) {
+      singleDeletePath = path;
+      singleDeleteInfo = info;
+    }
+    showConfirm = true;
+  }
+
   async function executeClean() {
     showConfirm = false;
     cleaning = true;
@@ -642,6 +658,9 @@
   $: outerArcs = buildOuterArcs(innerArcs);
   $: listItems = result ? getListItems(navVersion, sortBy) : [];
   $: totalCurrentSize = heatmapData.reduce((s, d) => s + d.size, 0);
+  // Reactive selected count/size for selection bar visibility
+  $: selectedCount = Object.keys(selectedPaths).length;
+  $: selectedSize = Object.values(selectedPaths).reduce((s, v) => s + v.size, 0);
 </script>
 
 <div class="clean-page">
@@ -705,13 +724,13 @@
     {/if}
 
     <!-- Selection bar -->
-    {#if getSelectedCount() > 0}
+    {#if selectedCount > 0}
       <div class="selection-bar">
-        <span class="sel-count">{getSelectedCount()} selected</span>
-        <span class="sel-size">{formatBytes(getSelectedSize())}</span>
+        <span class="sel-count">{selectedCount} selected</span>
+        <span class="sel-size">{formatBytes(selectedSize)}</span>
         <div class="sel-actions">
           <button class="btn-sm-ghost" on:click={deselectAll}>Deselect All</button>
-          <button class="btn-sm-danger" on:click={() => showConfirm = true}>Move to Trash</button>
+          <button class="btn-sm-danger" on:click={() => openDeleteConfirm(null, null)}>Delete All Selected</button>
         </div>
       </div>
     {/if}
@@ -838,10 +857,7 @@
                     class="inline-delete"
                     title="Move to Trash"
                     on:click|stopPropagation={() => {
-                      // Select ONLY this item and immediately show confirm
-                      singleDeletePath = item.path;
-                      singleDeleteInfo = { size: item.size, name: item.name };
-                      showConfirm = true;
+                      openDeleteConfirm(item.path, { size: item.size, name: item.name });
                     }}
                   >&#128465;</button>
                 {/if}

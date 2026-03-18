@@ -94,7 +94,43 @@ func (a *AnalyzeService) StartScan(path string, maxDepth int, requestId int) {
 			var dirsFound int64
 			var sizeFound int64
 
+			// Start partial-tree emitter: snapshots root.Children every 500ms
+			treeTicker := time.NewTicker(500 * time.Millisecond)
+			treeDone := make(chan struct{})
+			go func() {
+				defer treeTicker.Stop()
+				for {
+					select {
+					case <-treeTicker.C:
+						if a.ctx != nil && root.Children != nil {
+							// Snapshot children with current in-progress sizes
+							snapshot := make([]map[string]interface{}, 0, len(root.Children))
+							for _, c := range root.Children {
+								snapshot = append(snapshot, map[string]interface{}{
+									"name":  c.Name,
+									"path":  c.Path,
+									"size":  c.Size,
+									"isDir": c.IsDir,
+								})
+							}
+							wailsRuntime.EventsEmit(a.ctx, "analyze:partial-tree", map[string]interface{}{
+								"requestId":  requestId,
+								"items":      snapshot,
+								"filesFound": int(atomic.LoadInt64(&filesFound)),
+								"dirsFound":  int(atomic.LoadInt64(&dirsFound)),
+								"sizeFound":  atomic.LoadInt64(&sizeFound),
+							})
+						}
+					case <-treeDone:
+						return
+					case <-scanCtx.Done():
+						return
+					}
+				}
+			}()
+
 			a.scanDirAsync(scanCtx, root, path, 0, maxDepth, result, requestId, &filesFound, &dirsFound, &sizeFound)
+			close(treeDone)
 		} else {
 			root.Size = info.Size()
 			root.ModTime = info.ModTime().Unix()
@@ -120,8 +156,8 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 	}
 
 	if depth >= maxDepth {
-		// Use shallow 2-level estimate instead of full recursive walk
-		entry.Size = shallowDirSizeDeep(ctx, path, 2)
+		// Full recursive walk for accurate sizing (with cancellation support)
+		entry.Size = dirSizeRecursive(ctx, path)
 		atomic.AddInt64(sizeFound, entry.Size)
 		return
 	}
@@ -203,6 +239,13 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 				Percentage:  0,
 			})
 		}
+	}
+
+	// At depth 0, expose children early so partial-tree emitter can see them
+	if depth == 0 {
+		childMu.Lock()
+		entry.Children = childSlice
+		childMu.Unlock()
 	}
 
 	wg.Wait()
@@ -324,8 +367,7 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 			}
 
 			if e.IsDir() {
-				// Shallow: just estimate from immediate children
-				child.Size = shallowDirSize(fullPath)
+				child.Size = dirSizeRecursive(ctx, fullPath)
 			} else {
 				child.Size = eInfo.Size()
 			}

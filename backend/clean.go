@@ -411,8 +411,7 @@ func (c *CleanService) drillAsync(path string, ctx context.Context) []CleanItem 
 			if !entry.IsDir() {
 				sz = eInfo.Size()
 			} else {
-				// Shallow estimate: just count immediate children sizes
-				sz = shallowDirSize(fullPath)
+				sz = dirSizeRecursive(ctx, fullPath)
 			}
 			items = append(items, CleanItem{
 				Path:  fullPath,
@@ -553,10 +552,10 @@ func (c *CleanService) ExecuteClean(paths []string) (*CleanExecResult, error) {
 			continue
 		}
 
+		// Use file size directly; skip expensive recursive dir sizing
+		// (frontend already tracks sizes from scan data)
 		var size int64
-		if info.IsDir() {
-			size = dirSize(path)
-		} else {
+		if !info.IsDir() {
 			size = info.Size()
 		}
 

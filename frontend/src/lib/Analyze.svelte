@@ -20,6 +20,9 @@
   let drillLoading = false;
   let drillRequestId = 0;
 
+  // Navigation history stack — stores {path, children} for each level so back doesn't re-scan
+  let navHistory = [];
+
   // Sort
   let sortBy = 'size';
 
@@ -39,11 +42,16 @@
   // Reactivity trigger
   let navVersion = 0;
 
+  // Partial tree during scanning (real-time visualization)
+  let scanChildren = [];
+  let scanVersion = 0;
+
   // Event unsubscribers
   let unsubProgress = null;
   let unsubComplete = null;
   let unsubDrill = null;
   let unsubPrefetch = null;
+  let unsubPartialTree = null;
 
   function bumpNav() {
     navVersion++;
@@ -174,8 +182,11 @@
     scanning = true;
     scanResult = null;
     children = [];
+    scanChildren = [];
+    scanVersion = 0;
     selectedPaths = new Set();
     breadcrumbs = [];
+    navHistory = [];
     scanProgress = { currentFile: '', filesFound: 0, dirsFound: 0, sizeFound: 0, percentage: 0 };
 
     const reqId = ++drillRequestId;
@@ -192,10 +203,29 @@
     }
   }
 
+  function onPartialTree(data) {
+    if (!data || !scanning) return;
+    if (data.items) {
+      scanChildren = data.items
+        .filter(c => (c.size || 0) > 0 || c.isDir)
+        .sort((a, b) => (b.size || 0) - (a.size || 0));
+      scanVersion++;
+    }
+    if (data.filesFound !== undefined) {
+      scanProgress = {
+        ...scanProgress,
+        filesFound: data.filesFound,
+        dirsFound: data.dirsFound,
+        sizeFound: data.sizeFound,
+      };
+    }
+  }
+
   function onScanComplete(data) {
     if (!data) return;
     scanning = false;
     scanProgress = null;
+    scanChildren = [];
     scanResult = data.result || null;
 
     if (scanResult && scanResult.root && scanResult.root.children) {
@@ -206,6 +236,7 @@
 
     currentPath = scanPath.trim() || currentPath;
     updateBreadcrumbs(currentPath);
+    navHistory = []; // Reset history for fresh scan
     bumpNav();
 
     // Pre-fetch top 10 largest directories
@@ -234,10 +265,15 @@
   }
 
   // --- Navigation ---
-  async function drillDown(entry) {
+  async function drillDown(entry, { skipHistory = false } = {}) {
     if (!entry.isDir) return;
 
     const myId = ++drillRequestId;
+
+    // Save current state to history before navigating (unless restoring from history)
+    if (!skipHistory && children.length > 0) {
+      navHistory = [...navHistory, { path: currentPath, children: children }];
+    }
 
     currentPath = entry.path;
     updateBreadcrumbs(entry.path);
@@ -288,29 +324,80 @@
     CancelAnalyzeDrill();
     drillLoading = false;
 
-    // Go back one level
-    if (breadcrumbs.length > 1) {
+    // Go back one level using history
+    if (navHistory.length > 0) {
+      const prev = navHistory[navHistory.length - 1];
+      navHistory = navHistory.slice(0, -1);
+      currentPath = prev.path;
+      children = prev.children;
+      updateBreadcrumbs(prev.path);
+      selectedPaths = new Set();
+      bumpNav();
+    } else if (breadcrumbs.length > 1) {
       const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
       navigateBreadcrumb(parentCrumb.path);
     } else {
-      // Go to root of scan
       navigateBreadcrumb(breadcrumbs.length > 0 ? breadcrumbs[0].path : '/');
     }
   }
 
   function navigateBreadcrumb(path) {
-    // Don't increment drillRequestId here — let drillDown manage it
     CancelAnalyzeDrill();
     drillLoading = false;
-    drillDown({ path, isDir: true, children: null });
+
+    // Try to find matching history entry
+    if (navHistory.length > 0) {
+      const histIdx = navHistory.findIndex(h => h.path === path);
+      if (histIdx >= 0) {
+        drillRequestId++;
+        currentPath = navHistory[histIdx].path;
+        children = navHistory[histIdx].children;
+        navHistory = navHistory.slice(0, histIdx);
+        updateBreadcrumbs(currentPath);
+        selectedPaths = new Set();
+        bumpNav();
+        return;
+      }
+    }
+
+    // Check if navigating to scan root — use scanResult data directly
+    const scanRootPath = scanResult?.root?.path || scanPath.trim();
+    if (path === scanRootPath && scanResult?.root?.children) {
+      drillRequestId++;
+      currentPath = path;
+      children = scanResult.root.children;
+      navHistory = [];
+      updateBreadcrumbs(path);
+      selectedPaths = new Set();
+      bumpNav();
+      return;
+    }
+
+    // Fallback: drill with cache lookup
+    drillDown({ path, isDir: true, children: null }, { skipHistory: true });
   }
 
   function goBack() {
-    if (breadcrumbs.length > 1) {
+    if (navHistory.length > 0) {
+      // Restore previous state from history — no re-scan needed
+      CancelAnalyzeDrill();
+      drillLoading = false;
+      drillRequestId++;
+
+      const prev = navHistory[navHistory.length - 1];
+      navHistory = navHistory.slice(0, -1);
+
+      currentPath = prev.path;
+      children = prev.children;
+      updateBreadcrumbs(prev.path);
+      selectedPaths = new Set();
+      bumpNav();
+    } else if (breadcrumbs.length > 1) {
+      // Fallback: no history, try cache-based navigation
       const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
       CancelAnalyzeDrill();
       drillLoading = false;
-      drillDown({ path: parentCrumb.path, isDir: true, children: null });
+      drillDown({ path: parentCrumb.path, isDir: true, children: null }, { skipHistory: true });
     }
   }
 
@@ -344,6 +431,15 @@
   }
 
   // --- Delete ---
+  function openDeleteConfirm(path, info) {
+    deleting = false; // Reset so previous in-flight delete doesn't block new modal
+    if (path) {
+      singleDeletePath = path;
+      singleDeleteInfo = info;
+    }
+    showDeleteConfirm = true;
+  }
+
   async function executeDelete() {
     showDeleteConfirm = false;
     deleting = true;
@@ -413,6 +509,7 @@
     unsubProgress = EventsOn('analyze:progress', onScanProgress);
     unsubComplete = EventsOn('analyze:complete', onScanComplete);
     unsubDrill = EventsOn('analyze:drill-complete', onDrillComplete);
+    unsubPartialTree = EventsOn('analyze:partial-tree', onPartialTree);
     unsubPrefetch = EventsOn('analyze:prefetch-ready', (data) => {
       // A path is now cached; no action needed — next drill will hit cache
     });
@@ -422,6 +519,7 @@
     if (unsubProgress) unsubProgress();
     if (unsubComplete) unsubComplete();
     if (unsubDrill) unsubDrill();
+    if (unsubPartialTree) unsubPartialTree();
     if (unsubPrefetch) unsubPrefetch();
     CancelAnalyzeScan();
     CancelAnalyzeDrill();
@@ -432,6 +530,31 @@
   $: outerArcs = buildOuterArcs(innerArcs);
   $: listItems = getSortedChildren(navVersion, sortBy);
   $: totalCurrentSize = children.reduce((s, c) => s + (c.size || 0), 0);
+
+  // Scan-time sunburst arcs (from partial tree data)
+  $: scanInnerArcs = (() => {
+    if (!scanning || scanChildren.length === 0) return [];
+    const total = scanChildren.reduce((s, c) => s + (c.size || 0), 0);
+    if (total === 0) return [];
+    let angle = 0;
+    return scanChildren.map((entry, i) => {
+      const sweep = (entry.size / total) * 360;
+      const arc = {
+        label: entry.name,
+        path: entry.path,
+        size: entry.size,
+        isDir: entry.isDir,
+        color: COLORS[i % COLORS.length],
+        startAngle: angle,
+        sweepAngle: sweep,
+        index: i,
+        ring: 'inner',
+      };
+      angle += sweep;
+      return arc;
+    });
+  })();
+  $: scanTotalSize = scanChildren.reduce((s, c) => s + (c.size || 0), 0);
   $: selectedCount = selectedPaths.size;
   $: selectedSize = (() => {
     let total = 0;
@@ -464,31 +587,107 @@
     </button>
   </div>
 
-  <!-- Scan progress -->
+  <!-- Scan progress — real-time split view -->
   {#if scanning}
-    <div class="scan-progress-card">
-      <div class="progress-top">
-        <div class="progress-spinner"></div>
-        <div class="progress-info">
-          <div class="progress-title">Scanning your system...</div>
-          {#if scanProgress}
-            <div class="progress-file">{scanProgress.currentFile || ''}</div>
-            <div class="progress-stats">
-              <span>{(scanProgress.filesFound || 0).toLocaleString()} files</span>
-              <span class="dot">&middot;</span>
-              <span>{(scanProgress.dirsFound || 0).toLocaleString()} dirs</span>
-              <span class="dot">&middot;</span>
-              <span>{formatBytes(scanProgress.sizeFound || 0)}</span>
-            </div>
-          {/if}
+    <!-- Live stats bar -->
+    <div class="scan-live-bar">
+      <div class="scan-live-left">
+        <div class="progress-spinner-sm"></div>
+        <span class="scan-live-label">Scanning...</span>
+        {#if scanProgress}
+          <span class="scan-live-stat">{(scanProgress.filesFound || 0).toLocaleString()} files</span>
+          <span class="dot">&middot;</span>
+          <span class="scan-live-stat">{(scanProgress.dirsFound || 0).toLocaleString()} dirs</span>
+          <span class="dot">&middot;</span>
+          <span class="scan-live-stat">{formatBytes(scanProgress.sizeFound || 0)}</span>
+        {/if}
+      </div>
+      <div class="scan-live-file">{scanProgress?.currentFile || ''}</div>
+    </div>
+
+    <!-- Live split view -->
+    {#if scanChildren.length > 0}
+      <div class="split-view">
+        <!-- LEFT: live directory list -->
+        <div class="left-panel">
+          <div class="panel-header">
+            <span class="panel-title">{scanChildren.length} directories found</span>
+          </div>
+          <div class="file-list">
+            {#each scanChildren as entry, i}
+              {@const maxSize = scanChildren.length > 0 ? scanChildren[0].size : 1}
+              <div class="file-row">
+                <button class="file-info" style="cursor: default;">
+                  <div class="file-left">
+                    <span class="file-icon">{entry.isDir ? '&#128193;' : '&#128196;'}</span>
+                    <div class="file-details">
+                      <div class="file-name">{entry.name}</div>
+                      <div class="file-bar-track">
+                        <div class="file-bar-fill" style="width: {maxSize > 0 ? Math.max(2, (entry.size / maxSize) * 100) : 0}%; background: {COLORS[i % COLORS.length]}"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="file-right">
+                    <span class="file-size">{entry.size > 0 ? formatBytes(entry.size) : '...'}</span>
+                  </div>
+                </button>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- RIGHT: live sunburst -->
+        <div class="right-panel">
+          <div class="panel-header">
+            <span class="panel-title">Size Map</span>
+            <span class="panel-subtitle">Building...</span>
+          </div>
+          <div class="heatmap-container">
+            {#if scanInnerArcs.length > 0}
+              <svg viewBox="0 0 400 400" class="sunburst">
+                {#each scanInnerArcs as arc, i}
+                  <path
+                    d={describeArc(200, 200, 140, 70, arc.startAngle, arc.sweepAngle)}
+                    fill={arc.color}
+                    fill-opacity="0.75"
+                    stroke="var(--bg-primary)"
+                    stroke-width="2"
+                    class="arc-segment"
+                  />
+                {/each}
+                <text x="200" y="192" text-anchor="middle" fill="var(--text-primary)" font-size="20" font-weight="700">
+                  {formatBytes(scanTotalSize)}
+                </text>
+                <text x="200" y="214" text-anchor="middle" fill="var(--text-secondary)" font-size="13">
+                  {scanChildren.length} items
+                </text>
+                <text x="200" y="232" text-anchor="middle" fill="var(--text-muted)" font-size="10">
+                  Scanning...
+                </text>
+              </svg>
+            {:else}
+              <div class="heatmap-empty">
+                <div class="progress-spinner"></div>
+                <p style="margin-top: 16px;">Discovering directories...</p>
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
-      {#if scanProgress}
-        <div class="progress-bar-track">
-          <div class="progress-bar-fill" style="width: {Math.max(scanProgress.percentage || 0, 5)}%"></div>
+    {:else}
+      <!-- Initial scan state before any directories found -->
+      <div class="scan-progress-card">
+        <div class="progress-top">
+          <div class="progress-spinner"></div>
+          <div class="progress-info">
+            <div class="progress-title">Discovering directories...</div>
+            {#if scanProgress}
+              <div class="progress-file">{scanProgress.currentFile || ''}</div>
+            {/if}
+          </div>
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
 
   <!-- Empty state -->
   {:else if !scanResult}
@@ -522,7 +721,7 @@
         <span class="sel-size">{formatBytes(selectedSize)}</span>
         <div class="sel-actions">
           <button class="btn-sm-ghost" on:click={deselectAll}>Deselect All</button>
-          <button class="btn-sm-danger" on:click={() => showDeleteConfirm = true}>Move to Trash</button>
+          <button class="btn-sm-danger" on:click={() => openDeleteConfirm(null, null)}>Move to Trash</button>
         </div>
       </div>
     {/if}
@@ -620,9 +819,7 @@
                   class="inline-delete"
                   title="Move to Trash"
                   on:click|stopPropagation={() => {
-                    singleDeletePath = entry.path;
-                    singleDeleteInfo = { size: entry.size, name: entry.name };
-                    showDeleteConfirm = true;
+                    openDeleteConfirm(entry.path, { size: entry.size, name: entry.name });
                   }}
                 >&#128465;</button>
               </div>
@@ -817,6 +1014,33 @@
   .progress-stats .dot { color: var(--text-muted); }
   .progress-bar-track { height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden; }
   .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s ease; }
+
+  /* --- Scan live bar --- */
+  .scan-live-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; margin-bottom: 14px;
+    background: var(--accent-dim); border-radius: var(--radius-sm);
+    gap: 12px;
+  }
+  .scan-live-left {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text-secondary); flex-shrink: 0;
+  }
+  .scan-live-label { font-weight: 600; color: var(--accent); }
+  .scan-live-stat { font-weight: 500; }
+  .scan-live-file {
+    font-size: 11px; color: var(--text-muted);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; text-align: right;
+  }
+  .progress-spinner-sm {
+    width: 14px; height: 14px;
+    border: 2px solid var(--bg-tertiary); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  .dot { color: var(--text-muted); }
 
   /* --- Empty state --- */
   .empty-state { text-align: center; padding: 60px 0; }
