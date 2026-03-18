@@ -32,16 +32,8 @@ func (a *App) startup(ctx context.Context) {
 
 // --- Analyze ---
 
-func (a *App) ScanDirectory(path string, maxDepth int) (*backend.ScanResult, error) {
-	return a.analyze.ScanDirectory(path, maxDepth)
-}
-
 func (a *App) CancelScan() {
 	a.analyze.CancelScan()
-}
-
-func (a *App) GetDirectoryChildren(path string) ([]*backend.FileEntry, error) {
-	return a.analyze.GetDirectoryChildren(path)
 }
 
 func (a *App) StartAnalyzeScan(path string, maxDepth int, requestId int) {

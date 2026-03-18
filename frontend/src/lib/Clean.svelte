@@ -73,6 +73,7 @@
         index: i,
         type: 'category',
         risk: cat.risk,
+        children: cat.items.map(item => ({ label: item.name.split('/').pop() || item.name, size: item.size, path: item.path, isDir: item.isDir })),
       }));
     }
     if (currentView === 'category' && currentCatIndex >= 0) {
@@ -86,6 +87,7 @@
         type: 'item',
         path: item.path,
         isDir: item.isDir,
+        children: (item.children || []).map(c => ({ label: c.name?.split('/').pop() || c.name, size: c.size, path: c.path, isDir: c.isDir })),
       }));
     }
     if (currentView === 'item') {
@@ -97,21 +99,51 @@
         type: 'leaf',
         path: item.path,
         isDir: item.isDir,
+        children: (item.children || []).map(c => ({ label: c.name?.split('/').pop() || c.name, size: c.size, path: c.path, isDir: c.isDir })),
       }));
     }
     return [];
   }
 
-  function buildSunburstArcs(data) {
+  function buildInnerArcs(data) {
     const total = data.reduce((s, d) => s + d.size, 0);
     if (total === 0) return [];
     let angle = 0;
-    return data.map(d => {
+    return data.map((d, i) => {
       const sweep = (d.size / total) * 360;
-      const arc = { ...d, startAngle: angle, sweepAngle: sweep };
+      const arc = { ...d, startAngle: angle, sweepAngle: sweep, index: i, ring: 'inner' };
       angle += sweep;
       return arc;
     });
+  }
+
+  function buildOuterArcs(innerArcs) {
+    const outerArcs = [];
+    for (const inner of innerArcs) {
+      if (!inner.children || inner.children.length === 0) continue;
+      const childTotal = inner.children.reduce((s, c) => s + (c.size || 0), 0);
+      if (childTotal === 0) continue;
+      let angle = inner.startAngle;
+      for (const child of inner.children) {
+        const sweep = (child.size / childTotal) * inner.sweepAngle;
+        const relSize = child.size / childTotal;
+        const opacity = 0.5 + relSize * 0.4;
+        outerArcs.push({
+          label: child.label || child.name,
+          path: child.path,
+          size: child.size,
+          isDir: child.isDir,
+          color: inner.color,
+          opacity: Math.min(0.9, Math.max(0.5, opacity)),
+          startAngle: angle,
+          sweepAngle: sweep,
+          parentIndex: inner.index,
+          ring: 'outer',
+        });
+        angle += sweep;
+      }
+    }
+    return outerArcs;
   }
 
   function describeArc(cx, cy, r, innerR, startAngle, sweepAngle) {
@@ -606,7 +638,8 @@
 
   // FIXED: include navVersion as dependency so these update on navigation
   $: heatmapData = result ? getHeatmapData(navVersion) : [];
-  $: arcs = buildSunburstArcs(heatmapData);
+  $: innerArcs = buildInnerArcs(heatmapData);
+  $: outerArcs = buildOuterArcs(innerArcs);
   $: listItems = result ? getListItems(navVersion, sortBy) : [];
   $: totalCurrentSize = heatmapData.reduce((s, d) => s + d.size, 0);
 </script>
@@ -838,17 +871,33 @@
         </div>
 
         <div class="heatmap-container">
-          {#if arcs.length > 0}
+          {#if innerArcs.length > 0}
             <svg viewBox="0 0 300 300" class="sunburst">
-              {#each arcs as arc, i}
+              <!-- Inner ring: radius 55-100 -->
+              {#each innerArcs as arc, i}
                 <path
-                  d={describeArc(150, 150, 130, 55, arc.startAngle, arc.sweepAngle)}
+                  d={describeArc(150, 150, 100, 55, arc.startAngle, arc.sweepAngle)}
                   fill={arc.color}
-                  fill-opacity={hoveredSegment === i ? 1 : 0.75}
+                  fill-opacity={hoveredSegment && hoveredSegment.ring === 'inner' && hoveredSegment.index === i ? 1 : 0.75}
                   stroke="var(--bg-primary)"
                   stroke-width="2"
                   class="arc-segment"
-                  on:mouseenter={() => hoveredSegment = i}
+                  on:mouseenter={() => hoveredSegment = { ring: 'inner', index: i, label: arc.label, size: arc.size, isDir: arc.isDir !== undefined ? arc.isDir : true }}
+                  on:mouseleave={() => hoveredSegment = null}
+                  on:click={() => handleHeatmapClick(arc)}
+                />
+              {/each}
+
+              <!-- Outer ring: radius 105-135 -->
+              {#each outerArcs as arc, i}
+                <path
+                  d={describeArc(150, 150, 135, 105, arc.startAngle, arc.sweepAngle)}
+                  fill={arc.color}
+                  fill-opacity={hoveredSegment && hoveredSegment.ring === 'outer' && hoveredSegment.outerIndex === i ? 0.95 : arc.opacity}
+                  stroke="var(--bg-primary)"
+                  stroke-width="1"
+                  class="arc-segment"
+                  on:mouseenter={() => hoveredSegment = { ring: 'outer', outerIndex: i, label: arc.label, size: arc.size, isDir: arc.isDir }}
                   on:mouseleave={() => hoveredSegment = null}
                   on:click={() => handleHeatmapClick(arc)}
                 />
@@ -856,14 +905,14 @@
 
               <!-- Center text -->
               <text x="150" y="140" text-anchor="middle" fill="var(--text-primary)" font-size="16" font-weight="700">
-                {hoveredSegment !== null ? formatBytes(arcs[hoveredSegment].size) : formatBytes(totalCurrentSize)}
+                {hoveredSegment ? formatBytes(hoveredSegment.size) : formatBytes(totalCurrentSize)}
               </text>
               <text x="150" y="160" text-anchor="middle" fill="var(--text-secondary)" font-size="11">
-                {hoveredSegment !== null ? arcs[hoveredSegment].label : (heatmapData.length + ' items')}
+                {hoveredSegment ? hoveredSegment.label : (heatmapData.length + ' items')}
               </text>
-              {#if hoveredSegment !== null}
+              {#if hoveredSegment}
                 <text x="150" y="176" text-anchor="middle" fill="var(--text-muted)" font-size="9">
-                  {arcs[hoveredSegment].isDir ? 'Click to open' : 'Click to select'}
+                  {hoveredSegment.isDir ? 'Click to open' : 'Click to select'}
                 </text>
               {/if}
             </svg>
@@ -873,9 +922,9 @@
               {#each heatmapData.slice(0, 10) as segment, i}
                 <button
                   class="legend-item"
-                  class:hovered={hoveredSegment === i}
+                  class:hovered={hoveredSegment && hoveredSegment.ring === 'inner' && hoveredSegment.index === i}
                   class:is-selected={selectedPaths[segment.path]}
-                  on:mouseenter={() => hoveredSegment = i}
+                  on:mouseenter={() => hoveredSegment = { ring: 'inner', index: i, label: segment.label, size: segment.size, isDir: segment.isDir !== undefined ? segment.isDir : true }}
                   on:mouseleave={() => hoveredSegment = null}
                   on:click={() => handleHeatmapClick(segment)}
                 >
