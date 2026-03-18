@@ -27,6 +27,7 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.clean.SetContext(ctx)
+	a.analyze.SetContext(ctx)
 }
 
 // --- Analyze ---
@@ -41,6 +42,34 @@ func (a *App) CancelScan() {
 
 func (a *App) GetDirectoryChildren(path string) ([]*backend.FileEntry, error) {
 	return a.analyze.GetDirectoryChildren(path)
+}
+
+func (a *App) StartAnalyzeScan(path string, maxDepth int, requestId int) {
+	a.analyze.StartScan(path, maxDepth, requestId)
+}
+
+func (a *App) CancelAnalyzeScan() {
+	a.analyze.CancelScan()
+}
+
+func (a *App) StartAnalyzeDrill(path string, requestId int) {
+	a.analyze.StartDrill(path, requestId)
+}
+
+func (a *App) CancelAnalyzeDrill() {
+	a.analyze.CancelDrill()
+}
+
+func (a *App) PreFetchChildren(paths []string) {
+	a.analyze.PreFetchChildren(paths)
+}
+
+func (a *App) GetCachedChildren(path string) []*backend.FileEntry {
+	items, ok := a.analyze.GetCachedChildren(path)
+	if !ok {
+		return nil
+	}
+	return items
 }
 
 // --- Status ---

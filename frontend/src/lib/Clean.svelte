@@ -24,6 +24,9 @@
   // Reactivity trigger — bump this whenever nav state changes
   let navVersion = 0;
 
+  // Sort control for file list
+  let sortBy = 'size';
+
   // Selection: map of path -> {size, name}
   let selectedPaths = {};
 
@@ -290,6 +293,11 @@
       return;
     }
 
+    // Skip navigation if clicking the already-active (last) breadcrumb
+    if (index === breadcrumbs.length - 1) {
+      return;
+    }
+
     // Cancel any pending drill
     drillRequestId++;
     CancelDrill();
@@ -309,6 +317,10 @@
         return;
       }
     } else if (crumb.type === 'item' && crumb.path) {
+      // Preserve currentCatIndex from the first breadcrumb if it's a category
+      if (breadcrumbs.length > 0 && breadcrumbs[0].type === 'category') {
+        currentCatIndex = breadcrumbs[0].catIndex;
+      }
       // Fire-and-forget drill — result arrives via event
       const myId = ++drillRequestId;
       currentView = 'item';
@@ -331,7 +343,7 @@
 
   // Select all visible items (skipping category virtual rows)
   function selectAllVisible() {
-    const items = getListItems(navVersion);
+    const items = getListItems(navVersion, sortBy);
     for (const item of items) {
       if (!item.isCategoryRow) {
         selectedPaths[item.path] = { size: item.size, name: item.name };
@@ -370,8 +382,35 @@
   }
 
   // --- List items for current view ---
-  function getListItems(_v) {
+  function sortItems(items, sort) {
+    if (!items || items.length === 0) return items;
+    const sorted = [...items];
+    switch (sort) {
+      case 'name':
+        sorted.sort((a, b) => {
+          const nameA = (a.name.split('/').pop() || a.name).toLowerCase();
+          const nameB = (b.name.split('/').pop() || b.name).toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+        break;
+      case 'date':
+        if (sorted.some(item => item.modTime)) {
+          sorted.sort((a, b) => (b.modTime || 0) - (a.modTime || 0));
+        } else {
+          sorted.sort((a, b) => (b.size || 0) - (a.size || 0));
+        }
+        break;
+      case 'size':
+      default:
+        sorted.sort((a, b) => (b.size || 0) - (a.size || 0));
+        break;
+    }
+    return sorted;
+  }
+
+  function getListItems(_v, _sort) {
     if (currentView === 'root') {
+      // Categories always sorted by size, no user sort applied
       return (result?.categories || []).map((cat, i) => ({
         name: cat.name,
         size: cat.size,
@@ -386,9 +425,9 @@
     if (currentView === 'category' && currentCatIndex >= 0) {
       const cat = result.categories[currentCatIndex];
       if (!cat) return [];
-      return cat.items || [];
+      return sortItems(cat.items || [], sortBy);
     }
-    return currentItems;
+    return sortItems(currentItems, sortBy);
   }
 
   // --- Cleanup ---
@@ -568,7 +607,7 @@
   // FIXED: include navVersion as dependency so these update on navigation
   $: heatmapData = result ? getHeatmapData(navVersion) : [];
   $: arcs = buildSunburstArcs(heatmapData);
-  $: listItems = result ? getListItems(navVersion) : [];
+  $: listItems = result ? getListItems(navVersion, sortBy) : [];
   $: totalCurrentSize = heatmapData.reduce((s, d) => s + d.size, 0);
 </script>
 
@@ -678,9 +717,19 @@
             {/if}
           </span>
           {#if currentView !== 'root'}
+            <select class="sort-select" bind:value={sortBy}>
+              <option value="size">Size</option>
+              <option value="name">Name</option>
+              <option value="date">Date</option>
+            </select>
             <button class="btn-back" on:click={() => {
               if (breadcrumbs.length > 1) {
-                navigateBreadcrumb(breadcrumbs.length - 2);
+                // Navigate to parent breadcrumb; for item crumbs, find the nearest
+                // category or previous item level
+                const parentIndex = breadcrumbs.length - 2;
+                navigateBreadcrumb(parentIndex);
+              } else if (breadcrumbs.length === 1 && breadcrumbs[0].type === 'category') {
+                goToRoot();
               } else {
                 goToRoot();
               }
@@ -1005,6 +1054,18 @@
     transition: all var(--transition);
   }
   .btn-back:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .sort-select {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+  }
+  .sort-select:hover { border-color: var(--text-muted); }
 
   /* --- File list --- */
   .file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
