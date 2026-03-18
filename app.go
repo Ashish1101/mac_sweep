@@ -74,6 +74,30 @@ func (a *App) GetTopProcesses(limit int) ([]backend.ProcessInfo, error) {
 	return a.status.GetTopProcesses(limit)
 }
 
+func (a *App) GetAllProcesses() ([]backend.ProcessInfo, error) {
+	return a.status.GetAllProcesses()
+}
+
+func (a *App) KillProcess(pid int) backend.KillResult {
+	return a.status.KillProcess(pid)
+}
+
+func (a *App) GetCPUDetail() backend.CPUDetail {
+	return a.status.GetCPUDetail()
+}
+
+func (a *App) GetMemoryDetail() backend.MemoryDetail {
+	return a.status.GetMemoryDetail()
+}
+
+func (a *App) GetDiskDetail() backend.DiskDetail {
+	return a.status.GetDiskDetail()
+}
+
+func (a *App) GetBatteryDetail() backend.BatteryDetail {
+	return a.status.GetBatteryDetail()
+}
+
 // --- Safety ---
 
 func (a *App) MoveToTrash(path string) error {
