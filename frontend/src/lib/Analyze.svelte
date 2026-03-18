@@ -25,6 +25,7 @@
 
   // Heatmap
   let hoveredSegment = null;
+  let legendExpanded = false;
 
   // Delete
   let showDeleteConfirm = false;
@@ -354,6 +355,19 @@
       return;
     }
 
+    // Collect sizes BEFORE removing from children array
+    const deletedSet = new Set(pathsToDelete);
+    let freedSize = 0;
+    let freedFiles = 0;
+    let freedDirs = 0;
+    for (const child of children) {
+      if (deletedSet.has(child.path)) {
+        freedSize += child.size || 0;
+        if (child.isDir) freedDirs++;
+        else freedFiles++;
+      }
+    }
+
     let deletedCount = 0;
     for (const path of pathsToDelete) {
       try {
@@ -369,20 +383,14 @@
     }
 
     // Remove deleted items from children
-    const deletedSet = new Set(pathsToDelete);
     children = children.filter(c => !deletedSet.has(c.path));
 
-    // Update scan result totals
-    if (scanResult) {
-      for (const path of pathsToDelete) {
-        const item = children.find(c => c.path === path);
-        if (item) {
-          scanResult.totalSize -= item.size || 0;
-          if (item.isDir) scanResult.totalDirs--;
-          else scanResult.totalFiles--;
-        }
-      }
-      scanResult = scanResult;
+    // Update scan result totals with pre-collected sizes
+    if (scanResult && deletedCount > 0) {
+      scanResult.totalSize = Math.max(0, (scanResult.totalSize || 0) - freedSize);
+      scanResult.totalFiles = Math.max(0, (scanResult.totalFiles || 0) - freedFiles);
+      scanResult.totalDirs = Math.max(0, (scanResult.totalDirs || 0) - freedDirs);
+      scanResult = scanResult; // trigger reactivity
     }
 
     // Clear selection
@@ -642,11 +650,11 @@
 
         <div class="heatmap-container">
           {#if innerArcs.length > 0}
-            <svg viewBox="0 0 300 300" class="sunburst">
-              <!-- Inner ring: radius 55-100 -->
+            <svg viewBox="0 0 400 400" class="sunburst">
+              <!-- Inner ring -->
               {#each innerArcs as arc, i}
                 <path
-                  d={describeArc(150, 150, 100, 55, arc.startAngle, arc.sweepAngle)}
+                  d={describeArc(200, 200, 140, 70, arc.startAngle, arc.sweepAngle)}
                   fill={arc.color}
                   fill-opacity={hoveredSegment && hoveredSegment.ring === 'inner' && hoveredSegment.index === i ? 1 : 0.75}
                   stroke="var(--bg-primary)"
@@ -658,10 +666,10 @@
                 />
               {/each}
 
-              <!-- Outer ring: radius 105-135 -->
+              <!-- Outer ring -->
               {#each outerArcs as arc, i}
                 <path
-                  d={describeArc(150, 150, 135, 105, arc.startAngle, arc.sweepAngle)}
+                  d={describeArc(200, 200, 185, 148, arc.startAngle, arc.sweepAngle)}
                   fill={arc.color}
                   fill-opacity={hoveredSegment && hoveredSegment.ring === 'outer' && hoveredSegment.outerIndex === i ? 0.95 : arc.opacity}
                   stroke="var(--bg-primary)"
@@ -674,40 +682,45 @@
               {/each}
 
               <!-- Center text -->
-              <text x="150" y="140" text-anchor="middle" fill="var(--text-primary)" font-size="16" font-weight="700">
+              <text x="200" y="192" text-anchor="middle" fill="var(--text-primary)" font-size="20" font-weight="700">
                 {hoveredSegment ? formatBytes(hoveredSegment.size) : formatBytes(totalCurrentSize)}
               </text>
-              <text x="150" y="160" text-anchor="middle" fill="var(--text-secondary)" font-size="11">
+              <text x="200" y="214" text-anchor="middle" fill="var(--text-secondary)" font-size="13">
                 {hoveredSegment ? hoveredSegment.label : (children.length + ' items')}
               </text>
               {#if hoveredSegment}
-                <text x="150" y="176" text-anchor="middle" fill="var(--text-muted)" font-size="9">
+                <text x="200" y="232" text-anchor="middle" fill="var(--text-muted)" font-size="10">
                   {hoveredSegment.isDir ? 'Click to open' : ''}
                 </text>
               {/if}
             </svg>
 
-            <!-- Legend -->
-            <div class="heatmap-legend">
-              {#each innerArcs.slice(0, 10) as segment, i}
-                <button
-                  class="legend-item"
-                  class:hovered={hoveredSegment && hoveredSegment.ring === 'inner' && hoveredSegment.index === i}
-                  class:is-selected={selectedPaths.has(segment.path)}
-                  on:mouseenter={() => hoveredSegment = { ring: 'inner', index: i, label: segment.label, size: segment.size, isDir: segment.isDir }}
-                  on:mouseleave={() => hoveredSegment = null}
-                  on:click={() => handleHeatmapClick(segment)}
-                >
-                  <span class="legend-dot" style="background: {segment.color}"></span>
-                  <span class="legend-label">{segment.label}</span>
-                  <span class="legend-size">{formatBytes(segment.size)}</span>
-                  {#if segment.isDir}
-                    <span class="legend-arrow">&#9654;</span>
-                  {/if}
-                </button>
-              {/each}
-              {#if innerArcs.length > 10}
-                <div class="legend-more">+{innerArcs.length - 10} more</div>
+            <!-- Collapsible legend -->
+            <div class="legend-section">
+              <button class="legend-toggle" on:click={() => legendExpanded = !legendExpanded}>
+                <span>{innerArcs.length} items</span>
+                <span class="legend-toggle-icon">{legendExpanded ? '&#9660;' : '&#9654;'} {legendExpanded ? 'Hide' : 'Show'} legend</span>
+              </button>
+              {#if legendExpanded}
+                <div class="heatmap-legend">
+                  {#each innerArcs as segment, i}
+                    <button
+                      class="legend-item"
+                      class:hovered={hoveredSegment && hoveredSegment.ring === 'inner' && hoveredSegment.index === i}
+                      class:is-selected={selectedPaths.has(segment.path)}
+                      on:mouseenter={() => hoveredSegment = { ring: 'inner', index: i, label: segment.label, size: segment.size, isDir: segment.isDir }}
+                      on:mouseleave={() => hoveredSegment = null}
+                      on:click={() => handleHeatmapClick(segment)}
+                    >
+                      <span class="legend-dot" style="background: {segment.color}"></span>
+                      <span class="legend-label">{segment.label}</span>
+                      <span class="legend-size">{formatBytes(segment.size)}</span>
+                      {#if segment.isDir}
+                        <span class="legend-arrow">&#9654;</span>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
               {/if}
             </div>
           {:else}
@@ -848,7 +861,7 @@
 
   /* --- Split view --- */
   .split-view {
-    display: grid; grid-template-columns: 1fr 340px;
+    display: grid; grid-template-columns: 1fr 420px;
     gap: 16px; height: calc(100vh - 340px);
   }
   .left-panel, .right-panel {
@@ -961,15 +974,30 @@
   /* --- Sunburst heatmap --- */
   .heatmap-container {
     flex: 1; display: flex; flex-direction: column;
-    align-items: center; padding: 16px; overflow-y: auto;
+    align-items: center; padding: 12px; overflow-y: auto;
   }
-  .sunburst { width: 100%; max-width: 280px; margin-bottom: 16px; }
+  .sunburst { width: 100%; margin-bottom: 8px; }
   .arc-segment { cursor: pointer; transition: fill-opacity 0.15s ease; }
 
-  .heatmap-legend { width: 100%; display: flex; flex-direction: column; gap: 2px; }
+  .legend-section {
+    width: 100%; border-top: 1px solid var(--border);
+    margin-top: 4px;
+  }
+  .legend-toggle {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; padding: 8px 8px; background: none;
+    color: var(--text-secondary); font-size: 12px;
+    transition: all var(--transition);
+  }
+  .legend-toggle:hover { color: var(--text-primary); }
+  .legend-toggle-icon { font-size: 11px; color: var(--text-muted); }
+  .heatmap-legend {
+    width: 100%; display: flex; flex-direction: column; gap: 2px;
+    max-height: 200px; overflow-y: auto; padding: 0 0 4px;
+  }
   .legend-item {
     display: flex; align-items: center; gap: 8px;
-    padding: 6px 8px; border-radius: 6px;
+    padding: 5px 8px; border-radius: 6px;
     background: none; color: var(--text-primary); text-align: left;
     transition: background var(--transition); width: 100%;
   }
@@ -979,7 +1007,6 @@
   .legend-label { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .legend-size { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
   .legend-arrow { font-size: 9px; color: var(--text-muted); }
-  .legend-more { font-size: 11px; color: var(--text-muted); text-align: center; padding: 4px; }
   .heatmap-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 40px 16px; }
 
   /* --- Buttons --- */
