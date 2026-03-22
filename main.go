@@ -16,7 +16,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:            "Mole GUI",
+		Title:            "MacSweep",
 		Width:            1200,
 		Height:           800,
 		MinWidth:         900,
@@ -39,8 +39,8 @@ func main() {
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
 			About: &mac.AboutInfo{
-				Title:   "Mole GUI",
-				Message: "A safe, visual interface for Mole system maintenance",
+				Title:   "MacSweep",
+				Message: "A safe, visual disk cleaner for macOS",
 			},
 		},
 	})

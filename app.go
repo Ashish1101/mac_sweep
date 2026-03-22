@@ -2,25 +2,27 @@ package main
 
 import (
 	"context"
-	"mole-gui/backend"
+	"macsweep/backend"
 	"os"
 )
 
 type App struct {
-	ctx     context.Context
-	analyze *backend.AnalyzeService
-	status  *backend.StatusService
-	safety  *backend.SafetyService
-	clean   *backend.CleanService
+	ctx         context.Context
+	analyze     *backend.AnalyzeService
+	status      *backend.StatusService
+	safety      *backend.SafetyService
+	clean       *backend.CleanService
+	permissions *backend.PermissionsService
 }
 
 func NewApp() *App {
 	safety := backend.NewSafetyService()
 	return &App{
-		analyze: backend.NewAnalyzeService(),
-		status:  backend.NewStatusService(),
-		safety:  safety,
-		clean:   backend.NewCleanService(safety),
+		analyze:     backend.NewAnalyzeService(),
+		status:      backend.NewStatusService(),
+		safety:      safety,
+		clean:       backend.NewCleanService(safety),
+		permissions: backend.NewPermissionsService(),
 	}
 }
 
@@ -98,6 +100,18 @@ func (a *App) GetBatteryDetail() backend.BatteryDetail {
 	return a.status.GetBatteryDetail()
 }
 
+func (a *App) GetNetworkDetail() backend.NetworkDetail {
+	return a.status.GetNetworkDetail()
+}
+
+func (a *App) GetWiFiDetail() backend.WiFiDetail {
+	return a.status.GetWiFiDetail()
+}
+
+func (a *App) GetWiFiPassword(networkName string) (string, error) {
+	return a.status.GetWiFiPassword(networkName)
+}
+
 // --- Safety ---
 
 func (a *App) MoveToTrash(path string) error {
@@ -110,6 +124,26 @@ func (a *App) MoveMultipleToTrash(paths []string) ([]string, []string) {
 
 func (a *App) GetOperationHistory(limit int) ([]backend.OperationLog, error) {
 	return a.safety.GetOperationHistory(limit)
+}
+
+func (a *App) RestoreFromTrash(originalPath string) error {
+	return a.safety.RestoreFromTrash(originalPath)
+}
+
+func (a *App) RestoreAllFromTrash() backend.RestoreResult {
+	return a.safety.RestoreAllFromTrash()
+}
+
+func (a *App) CanAccessTrash() bool {
+	return a.safety.CanAccessTrash()
+}
+
+func (a *App) GetTrashItems() []string {
+	return a.safety.GetTrashItems()
+}
+
+func (a *App) EmptyTrash() error {
+	return a.safety.EmptyTrash()
 }
 
 // --- Clean ---
@@ -132,6 +166,20 @@ func (a *App) ExecuteClean(paths []string) (*backend.CleanExecResult, error) {
 
 func (a *App) PlayTrashSound() {
 	a.safety.PlayTrashSound()
+}
+
+func (a *App) PlaySound(soundID string) {
+	a.safety.PlaySound(soundID)
+}
+
+// --- Permissions ---
+
+func (a *App) CheckFullDiskAccess() backend.FDAStatus {
+	return a.permissions.CheckFullDiskAccess()
+}
+
+func (a *App) OpenFullDiskAccessSettings() error {
+	return a.permissions.OpenFullDiskAccessSettings()
 }
 
 // --- Utility ---

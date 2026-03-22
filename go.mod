@@ -1,4 +1,4 @@
-module mole-gui
+module macsweep
 
 go 1.23
 

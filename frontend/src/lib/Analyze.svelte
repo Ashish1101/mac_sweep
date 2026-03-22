@@ -1,6 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { StartAnalyzeScan, CancelAnalyzeScan, StartAnalyzeDrill, CancelAnalyzeDrill, PreFetchChildren, GetCachedChildren, GetHomeDir, MoveToTrash, PlayTrashSound } from '../../wailsjs/go/main/App.js';
+  import { StartAnalyzeScan, CancelAnalyzeScan, StartAnalyzeDrill, CancelAnalyzeDrill, PreFetchChildren, GetCachedChildren, GetHomeDir, MoveToTrash, CheckFullDiskAccess } from '../../wailsjs/go/main/App.js';
+  import { playDeleteSound } from '../stores/sound.js';
+  import { fdaStatus } from '../stores/permissions.js';
   import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime.js';
 
   // --- State ---
@@ -475,7 +477,7 @@
     }
 
     if (deletedCount > 0) {
-      PlayTrashSound();
+      playDeleteSound();
     }
 
     // Remove deleted items from children
@@ -487,6 +489,49 @@
       scanResult.totalFiles = Math.max(0, (scanResult.totalFiles || 0) - freedFiles);
       scanResult.totalDirs = Math.max(0, (scanResult.totalDirs || 0) - freedDirs);
       scanResult = scanResult; // trigger reactivity
+    }
+
+    // Purge deleted items from navigation history so back button doesn't show them
+    if (deletedCount > 0) {
+      navHistory = navHistory.map(entry => {
+        const filtered = entry.children.filter(c => !deletedSet.has(c.path));
+        // Update parent size: subtract freed size from this level if items were removed
+        const removedFromThis = entry.children.length - filtered.length;
+        return {
+          ...entry,
+          children: filtered.map(c => {
+            // Also remove deleted items from nested children
+            if (c.children) {
+              const beforeLen = c.children.length;
+              const filteredKids = c.children.filter(gc => !deletedSet.has(gc.path));
+              if (filteredKids.length < beforeLen) {
+                const removedSize = c.children
+                  .filter(gc => deletedSet.has(gc.path))
+                  .reduce((s, gc) => s + (gc.size || 0), 0);
+                return { ...c, children: filteredKids, size: Math.max(0, (c.size || 0) - removedSize) };
+              }
+            }
+            return c;
+          }),
+        };
+      });
+
+      // Also purge from scanResult.root.children (used by breadcrumb nav to root)
+      if (scanResult && scanResult.root && scanResult.root.children) {
+        scanResult.root.children = scanResult.root.children.map(c => {
+          if (deletedSet.has(c.path)) return null;
+          if (c.children) {
+            const filteredKids = c.children.filter(gc => !deletedSet.has(gc.path));
+            if (filteredKids.length < c.children.length) {
+              const removedSize = c.children
+                .filter(gc => deletedSet.has(gc.path))
+                .reduce((s, gc) => s + (gc.size || 0), 0);
+              return { ...c, children: filteredKids, size: Math.max(0, (c.size || 0) - removedSize) };
+            }
+          }
+          return c;
+        }).filter(Boolean);
+      }
     }
 
     // Clear selection
@@ -505,6 +550,11 @@
     const home = await GetHomeDir();
     currentPath = home;
     scanPath = home;
+
+    try {
+      const result = await CheckFullDiskAccess();
+      fdaStatus.set(result);
+    } catch (e) {}
 
     unsubProgress = EventsOn('analyze:progress', onScanProgress);
     unsubComplete = EventsOn('analyze:complete', onScanComplete);
@@ -587,6 +637,10 @@
     </button>
   </div>
 
+  {#if $fdaStatus && !$fdaStatus.hasFullDiskAccess}
+    <div class="fda-hint">Some directories may be hidden. Grant Full Disk Access for complete results.</div>
+  {/if}
+
   <!-- Scan progress — real-time split view -->
   {#if scanning}
     <!-- Live stats bar -->
@@ -619,7 +673,7 @@
               <div class="file-row">
                 <button class="file-info" style="cursor: default;">
                   <div class="file-left">
-                    <span class="file-icon">{entry.isDir ? '&#128193;' : '&#128196;'}</span>
+                    <span class="file-icon">{entry.isDir ? '\u{1F4C1}' : '\u{1F4C4}'}</span>
                     <div class="file-details">
                       <div class="file-name">{entry.name}</div>
                       <div class="file-bar-track">
@@ -896,7 +950,7 @@
             <div class="legend-section">
               <button class="legend-toggle" on:click={() => legendExpanded = !legendExpanded}>
                 <span>{innerArcs.length} items</span>
-                <span class="legend-toggle-icon">{legendExpanded ? '&#9660;' : '&#9654;'} {legendExpanded ? 'Hide' : 'Show'} legend</span>
+                <span class="legend-toggle-icon">{legendExpanded ? '\u25BC' : '\u25B6'} {legendExpanded ? 'Hide' : 'Show'} legend</span>
               </button>
               {#if legendExpanded}
                 <div class="heatmap-legend">
@@ -987,6 +1041,13 @@
   }
   .scan-input:focus { border-color: var(--accent); }
   .scan-input:disabled { opacity: 0.5; }
+
+  .fda-hint {
+    font-size: 12px;
+    color: var(--yellow);
+    margin-top: 6px;
+    margin-bottom: 4px;
+  }
 
   /* --- Scan progress --- */
   .scan-progress-card {

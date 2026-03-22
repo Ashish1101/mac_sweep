@@ -1,11 +1,46 @@
 <script>
+  import { onMount } from 'svelte';
+  import { CheckFullDiskAccess, OpenFullDiskAccessSettings } from '../../wailsjs/go/main/App.js';
+  import { fdaStatus } from '../stores/permissions.js';
+  import { settings } from '../stores/settings.js';
+  import { previewSound } from '../stores/sound.js';
+
   let activeTab = 'general';
+  let fdaChecking = false;
+  let fdaJustChecked = false;
+
+  async function checkFDA() {
+    fdaChecking = true;
+    try {
+      const result = await CheckFullDiskAccess();
+      fdaStatus.set(result);
+    } catch (e) {
+      console.error('Failed to check FDA:', e);
+    }
+    fdaChecking = false;
+    fdaJustChecked = true;
+    setTimeout(() => { fdaJustChecked = false; }, 1500);
+  }
+
+  async function openFDASettings() {
+    try {
+      await OpenFullDiskAccessSettings();
+    } catch (e) {
+      console.error('Failed to open settings:', e);
+    }
+  }
+
+  function toggleSetting(key) {
+    settings.setSetting(key, !$settings[key]);
+  }
+
+  onMount(() => { checkFDA(); });
 </script>
 
 <div class="settings-page">
   <div class="page-header">
     <h1>Settings</h1>
-    <p class="subtitle">Configure Mole GUI preferences</p>
+    <p class="subtitle">Configure MacSweep preferences</p>
   </div>
 
   <div class="settings-layout">
@@ -18,16 +53,39 @@
     <div class="settings-content">
       {#if activeTab === 'general'}
         <div class="setting-group">
+          <h3>Permissions</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-name">Full Disk Access</div>
+              <div class="setting-desc">Required for scanning privacy-protected directories</div>
+            </div>
+            {#if $fdaStatus && $fdaStatus.hasFullDiskAccess}
+              <span class="badge granted">Granted</span>
+            {:else}
+              <div class="fda-row-actions">
+                <span class="badge not-granted" class:flash={fdaJustChecked}>
+                  {fdaChecking ? 'Checking...' : 'Not Granted'}
+                </span>
+                <button class="setting-btn" on:click={openFDASettings}>Open Settings</button>
+                <button class="setting-btn subtle" on:click={checkFDA} disabled={fdaChecking}>
+                  {fdaChecking ? 'Checking...' : 'Refresh'}
+                </button>
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="setting-group">
           <h3>Appearance</h3>
           <div class="setting-row">
             <div class="setting-info">
               <div class="setting-name">Theme</div>
               <div class="setting-desc">Choose application theme</div>
             </div>
-            <select class="setting-select" disabled>
-              <option>Dark</option>
-              <option>Light</option>
-              <option>System</option>
+            <select class="setting-select" value={$settings.theme} on:change={(e) => settings.setSetting('theme', e.target.value)}>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">System</option>
             </select>
           </div>
         </div>
@@ -39,11 +97,70 @@
               <div class="setting-name">Refresh Interval</div>
               <div class="setting-desc">How often to update system metrics</div>
             </div>
-            <select class="setting-select" disabled>
-              <option>2 seconds</option>
-              <option>5 seconds</option>
-              <option>10 seconds</option>
+            <select class="setting-select" value={$settings.refreshInterval} on:change={(e) => settings.setSetting('refreshInterval', Number(e.target.value))}>
+              <option value={2}>2 seconds</option>
+              <option value={5}>5 seconds</option>
+              <option value={10}>10 seconds</option>
             </select>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <h3>Sounds</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-name">Delete Sound</div>
+              <div class="setting-desc">Sound to play when moving items to Trash</div>
+            </div>
+            <div class="sound-picker">
+              <select class="setting-select" value={$settings.deleteSound} on:change={(e) => settings.setSetting('deleteSound', e.target.value)}>
+                <option value="default">macOS Trash (Default)</option>
+                <optgroup label="Meme Sounds">
+                  <option value="faaah">FAAAH</option>
+                  <option value="he-knew">He Knew He F'd Up</option>
+                  <option value="really-nigga">Really Nigga</option>
+                  <option value="oh-my-god">Ohhh My God</option>
+                  <option value="wait-a-minute">Wait A Minute (Kazoo)</option>
+                </optgroup>
+                <optgroup label="System Sounds">
+                  <option value="funk">Funk</option>
+                  <option value="glass">Glass</option>
+                  <option value="pop">Pop</option>
+                  <option value="basso">Basso</option>
+                  <option value="hero">Hero</option>
+                  <option value="sosumi">Sosumi</option>
+                </optgroup>
+                <option value="none">None (Silent)</option>
+              </select>
+              <button class="btn-preview" on:click={() => previewSound($settings.deleteSound)} title="Preview sound">&#9654;</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-name">Restore Sound</div>
+              <div class="setting-desc">Sound to play when restoring items from Trash</div>
+            </div>
+            <div class="sound-picker">
+              <select class="setting-select" value={$settings.restoreSound} on:change={(e) => settings.setSetting('restoreSound', e.target.value)}>
+                <option value="default">macOS Trash (Default)</option>
+                <optgroup label="Meme Sounds">
+                  <option value="wait-a-minute">Wait A Minute (Kazoo)</option>
+                  <option value="faaah">FAAAH</option>
+                  <option value="he-knew">He Knew He F'd Up</option>
+                  <option value="really-nigga">Really Nigga</option>
+                  <option value="oh-my-god">Ohhh My God</option>
+                </optgroup>
+                <optgroup label="System Sounds">
+                  <option value="hero">Hero</option>
+                  <option value="glass">Glass</option>
+                  <option value="pop">Pop</option>
+                  <option value="funk">Funk</option>
+                  <option value="sosumi">Sosumi</option>
+                </optgroup>
+                <option value="none">None (Silent)</option>
+              </select>
+              <button class="btn-preview" on:click={() => previewSound($settings.restoreSound)} title="Preview sound">&#9654;</button>
+            </div>
           </div>
         </div>
 
@@ -55,7 +172,7 @@
               <div class="setting-name">Always use Trash</div>
               <div class="setting-desc">Move files to Trash instead of permanent deletion</div>
             </div>
-            <div class="toggle on">
+            <div class="toggle" class:on={$settings.alwaysUseTrash} on:click={() => toggleSetting('alwaysUseTrash')}>
               <div class="toggle-knob"></div>
             </div>
           </div>
@@ -64,7 +181,7 @@
               <div class="setting-name">Require confirmation</div>
               <div class="setting-desc">Show confirmation dialog before destructive operations</div>
             </div>
-            <div class="toggle on">
+            <div class="toggle" class:on={$settings.requireConfirmation} on:click={() => toggleSetting('requireConfirmation')}>
               <div class="toggle-knob"></div>
             </div>
           </div>
@@ -73,10 +190,10 @@
               <div class="setting-name">Trash retention</div>
               <div class="setting-desc">Days before auto-emptying Trash items</div>
             </div>
-            <select class="setting-select" disabled>
-              <option>30 days</option>
-              <option>7 days</option>
-              <option>Never</option>
+            <select class="setting-select" value={$settings.trashRetention} on:change={(e) => settings.setSetting('trashRetention', Number(e.target.value))}>
+              <option value={30}>30 days</option>
+              <option value={7}>7 days</option>
+              <option value={0}>Never</option>
             </select>
           </div>
         </div>
@@ -88,7 +205,7 @@
               <div class="setting-name">Operation logging</div>
               <div class="setting-desc">Log all operations for audit trail</div>
             </div>
-            <div class="toggle on">
+            <div class="toggle" class:on={$settings.operationLogging} on:click={() => toggleSetting('operationLogging')}>
               <div class="toggle-knob"></div>
             </div>
           </div>
@@ -97,18 +214,13 @@
       {:else if activeTab === 'about'}
         <div class="about-section">
           <div class="about-logo">&#9900;</div>
-          <h2>Mole GUI</h2>
+          <h2>MacSweep</h2>
           <p class="about-version">Version 0.1.0</p>
           <p class="about-desc">
-            A safe, visual interface for the Mole system maintenance tool.
-            Wraps the Mole CLI with safety features including trash-based deletion,
-            dry-run previews, and risk classification.
+            A safe, visual disk cleaner for macOS.
+            Features trash-based deletion, dry-run previews, and risk classification.
           </p>
           <div class="about-links">
-            <div class="about-link">
-              <span class="link-label">Mole CLI</span>
-              <span class="link-value">github.com/tw93/Mole</span>
-            </div>
             <div class="about-link">
               <span class="link-label">License</span>
               <span class="link-value">MIT</span>
@@ -193,6 +305,35 @@
     border-radius: 6px;
     padding: 6px 12px;
     font-size: 13px;
+    cursor: pointer;
+  }
+
+  .sound-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-preview {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all var(--transition);
+    flex-shrink: 0;
+  }
+
+  .btn-preview:hover {
+    background: var(--accent);
+    color: var(--bg-primary);
+    border-color: var(--accent);
   }
 
   .toggle {
@@ -203,6 +344,7 @@
     position: relative;
     cursor: pointer;
     transition: background var(--transition);
+    flex-shrink: 0;
   }
 
   .toggle.on {
@@ -223,6 +365,63 @@
   .toggle.on .toggle-knob {
     left: 22px;
   }
+
+  .badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .badge.granted {
+    background: var(--green-dim);
+    color: var(--green);
+  }
+
+  .badge.not-granted {
+    background: var(--yellow-dim);
+    color: var(--yellow);
+    transition: all 0.3s ease;
+  }
+
+  .badge.not-granted.flash {
+    animation: badge-flash 0.6s ease;
+  }
+
+  @keyframes badge-flash {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.1); background: var(--yellow); color: var(--bg-primary); }
+    100% { transform: scale(1); }
+  }
+
+  .fda-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .setting-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--transition);
+    white-space: nowrap;
+  }
+
+  .setting-btn:hover { opacity: 0.9; }
+
+  .setting-btn.subtle {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+
+  .setting-btn.subtle:hover { background: var(--bg-hover); }
 
   .about-section {
     text-align: center;

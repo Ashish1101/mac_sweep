@@ -27,6 +27,30 @@
   --titlebar-height: 38px;
 }
 
+:root.light {
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #eaeaef;
+  --bg-tertiary: #dddde5;
+  --bg-card: #ffffff;
+  --bg-hover: #ededf2;
+  --text-primary: #1c1c2e;
+  --text-secondary: #6b6b80;
+  --text-muted: #9999ad;
+  --accent: #6b46e5;
+  --accent-hover: #7c5cfc;
+  --accent-dim: rgba(107, 70, 229, 0.12);
+  --green: #16a34a;
+  --green-dim: rgba(22, 163, 74, 0.12);
+  --yellow: #ca8a04;
+  --yellow-dim: rgba(202, 138, 4, 0.12);
+  --red: #dc2626;
+  --red-dim: rgba(220, 38, 38, 0.12);
+  --blue: #2563eb;
+  --blue-dim: rgba(37, 99, 235, 0.12);
+  --border: #d4d4dc;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
 * {
   margin: 0;
   padding: 0;

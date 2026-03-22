@@ -19,7 +19,7 @@
   <div class="titlebar-drag"></div>
   <div class="logo">
     <span class="logo-icon">&#9900;</span>
-    <span class="logo-text">Mole</span>
+    <span class="logo-text">MacSweep</span>
   </div>
   <nav>
     {#each navItems as item}
@@ -34,7 +34,7 @@
     {/each}
   </nav>
   <div class="sidebar-footer">
-    <div class="version">Mole GUI v0.1.0</div>
+    <div class="version">MacSweep v0.1.0</div>
   </div>
 </aside>
 

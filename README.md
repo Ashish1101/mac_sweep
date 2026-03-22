@@ -1,16 +1,39 @@
-# README
+# MacSweep
 
-## About
+A macOS disk cleaner app built with [Wails](https://wails.io/) (Go backend + Svelte frontend). Analyze disk usage, clean junk files, monitor system resources, and manage operation history with restore support.
 
-This is the official Wails Svelte template.
+## Prerequisites
 
-## Live Development
+- [Go](https://go.dev/dl/) 1.21+
+- [Node.js](https://nodejs.org/) 18+
+- [Wails CLI](https://wails.io/docs/gettingstarted/installation)
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+```bash
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+```
+
+## Development
+
+Run in live development mode with hot reload:
+
+```bash
+$(go env GOPATH)/bin/wails dev
+```
+
+This starts a Vite dev server for the frontend with hot reload. A browser dev server is also available at http://localhost:34115 where you can call Go methods from devtools.
 
 ## Building
 
-To build a redistributable, production mode package, use `wails build`.
+Build a production `.app` bundle:
+
+```bash
+$(go env GOPATH)/bin/wails build
+```
+
+The built application will be at `build/bin/macsweep.app`.
+
+To run the built app:
+
+```bash
+open build/bin/macsweep.app
+```

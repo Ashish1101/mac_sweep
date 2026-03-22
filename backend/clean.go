@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -411,7 +412,8 @@ func (c *CleanService) drillAsync(path string, ctx context.Context) []CleanItem 
 			if !entry.IsDir() {
 				sz = eInfo.Size()
 			} else {
-				sz = dirSizeRecursive(ctx, fullPath)
+				var seen sync.Map
+				sz = dirSizeRecursive(ctx, fullPath, &seen)
 			}
 			items = append(items, CleanItem{
 				Path:  fullPath,

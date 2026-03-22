@@ -1,4 +1,32 @@
+# Build output
 build/bin
+
+# Frontend
 node_modules
 frontend/dist
 frontend/wailsjs
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Env
+.env
+.env.local
+
+# Docs/plans (optional local only)
+docs/
+implementation.md

@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { CleanDryRun, ExecuteClean, StartDrill, CancelDrill, MoveToTrash, PlayTrashSound } from '../../wailsjs/go/main/App.js';
+  import { CleanDryRun, ExecuteClean, StartDrill, CancelDrill, MoveToTrash } from '../../wailsjs/go/main/App.js';
+  import { playDeleteSound } from '../stores/sound.js';
   import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime.js';
 
   // --- State ---
@@ -503,7 +504,7 @@
 
       // Play macOS trash sound
       if (execResult && execResult.deletedCount > 0) {
-        PlayTrashSound();
+        playDeleteSound();
       }
 
       // Remove deleted paths from the result data so list refreshes

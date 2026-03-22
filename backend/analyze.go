@@ -5,13 +5,36 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// inodeID uniquely identifies a file across devices.
+type inodeID struct {
+	dev uint64
+	ino uint64
+}
+
+// inodeFromInfo extracts the inode identity from an existing os.FileInfo
+// without making an extra syscall.
+func inodeFromInfo(info os.FileInfo) (inodeID, bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return inodeID{}, false
+	}
+	return inodeID{dev: uint64(st.Dev), ino: st.Ino}, true
+}
+
+// seenAdd returns true if the inode was already seen (and should be skipped),
+// false if it is new (and has been recorded).
+func seenAdd(seen *sync.Map, id inodeID) bool {
+	_, loaded := seen.LoadOrStore(id, struct{}{})
+	return loaded
+}
 
 type FileEntry struct {
 	Name     string       `json:"name"`
@@ -93,6 +116,7 @@ func (a *AnalyzeService) StartScan(path string, maxDepth int, requestId int) {
 			var filesFound int64
 			var dirsFound int64
 			var sizeFound int64
+			var seenInodes sync.Map
 
 			// Start partial-tree emitter: snapshots root.Children every 500ms
 			treeTicker := time.NewTicker(500 * time.Millisecond)
@@ -129,8 +153,9 @@ func (a *AnalyzeService) StartScan(path string, maxDepth int, requestId int) {
 				}
 			}()
 
-			a.scanDirAsync(scanCtx, root, path, 0, maxDepth, result, requestId, &filesFound, &dirsFound, &sizeFound)
+			a.scanDirAsync(scanCtx, root, path, 0, maxDepth, result, requestId, &filesFound, &dirsFound, &sizeFound, &seenInodes)
 			close(treeDone)
+			result.TotalSize = root.Size
 		} else {
 			root.Size = info.Size()
 			root.ModTime = info.ModTime().Unix()
@@ -148,7 +173,7 @@ func (a *AnalyzeService) StartScan(path string, maxDepth int, requestId int) {
 	}()
 }
 
-func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, path string, depth, maxDepth int, result *ScanResult, requestId int, filesFound, dirsFound, sizeFound *int64) {
+func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, path string, depth, maxDepth int, result *ScanResult, requestId int, filesFound, dirsFound, sizeFound *int64, seen *sync.Map) {
 	select {
 	case <-ctx.Done():
 		return
@@ -157,7 +182,7 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 
 	if depth >= maxDepth {
 		// Full recursive walk for accurate sizing (with cancellation support)
-		entry.Size = dirSizeRecursive(ctx, path)
+		entry.Size = dirSizeRecursive(ctx, path, seen)
 		atomic.AddInt64(sizeFound, entry.Size)
 		return
 	}
@@ -187,10 +212,6 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 		}
 
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-
 		fullPath := filepath.Join(path, name)
 		info, err := e.Info()
 		if err != nil {
@@ -210,17 +231,22 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 			go func(c *FileEntry, fp string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				a.scanDirAsync(ctx, c, fp, depth+1, maxDepth, result, requestId, filesFound, dirsFound, sizeFound)
+				a.scanDirAsync(ctx, c, fp, depth+1, maxDepth, result, requestId, filesFound, dirsFound, sizeFound, seen)
 			}(child, fullPath)
 		} else {
-			child.Size = info.Size()
-			atomic.AddInt64(filesFound, 1)
-			atomic.AddInt64(sizeFound, child.Size)
-			result.TotalFiles++
+			if id, ok := inodeFromInfo(info); !ok || !seenAdd(seen, id) {
+				child.Size = info.Size()
+				atomic.AddInt64(filesFound, 1)
+				atomic.AddInt64(sizeFound, child.Size)
+				result.TotalFiles++
+			}
 		}
 
 		childMu.Lock()
 		childSlice = append(childSlice, child)
+		if depth == 0 {
+			entry.Children = childSlice
+		}
 		childMu.Unlock()
 	}
 
@@ -239,13 +265,6 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 				Percentage:  0,
 			})
 		}
-	}
-
-	// At depth 0, expose children early so partial-tree emitter can see them
-	if depth == 0 {
-		childMu.Lock()
-		entry.Children = childSlice
-		childMu.Unlock()
 	}
 
 	wg.Wait()
@@ -278,7 +297,6 @@ func (a *AnalyzeService) scanDirAsync(ctx context.Context, entry *FileEntry, pat
 
 	entry.Children = children
 	entry.Size = totalSize
-	result.TotalSize += totalSize
 }
 
 // CancelScan cancels any in-flight async scan.
@@ -336,6 +354,7 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 		return nil
 	}
 
+	var seen sync.Map
 	const largeThreshold = 200
 
 	if len(entries) > largeThreshold {
@@ -349,10 +368,6 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 			}
 
 			name := e.Name()
-			if strings.HasPrefix(name, ".") {
-				continue
-			}
-
 			fullPath := filepath.Join(path, name)
 			eInfo, err := e.Info()
 			if err != nil {
@@ -367,7 +382,7 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 			}
 
 			if e.IsDir() {
-				child.Size = dirSizeRecursive(ctx, fullPath)
+				child.Size = dirSizeRecursive(ctx, fullPath, &seen)
 			} else {
 				child.Size = eInfo.Size()
 			}
@@ -395,10 +410,6 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 		}
 
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-
 		fullPath := filepath.Join(path, name)
 		eInfo, err := e.Info()
 		if err != nil {
@@ -418,7 +429,7 @@ func (a *AnalyzeService) drillInto(ctx context.Context, path string) []*FileEntr
 			go func(c *FileEntry, fp string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				c.Size = dirSizeCtx(ctx, fp)
+				c.Size = dirSizeCtx(ctx, fp, &seen)
 			}(child, fullPath)
 		} else {
 			child.Size = eInfo.Size()
@@ -488,6 +499,7 @@ func (a *AnalyzeService) fetchChildrenWithSizes(ctx context.Context, path string
 	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var seen sync.Map
 
 	for _, e := range entries {
 		select {
@@ -497,10 +509,6 @@ func (a *AnalyzeService) fetchChildrenWithSizes(ctx context.Context, path string
 		}
 
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-
 		fullPath := filepath.Join(path, name)
 		info, err := e.Info()
 		if err != nil {
@@ -520,7 +528,7 @@ func (a *AnalyzeService) fetchChildrenWithSizes(ctx context.Context, path string
 			go func(c *FileEntry, fp string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				c.Size = dirSizeCtx(ctx, fp)
+				c.Size = dirSizeCtx(ctx, fp, &seen)
 			}(child, fullPath)
 		} else {
 			child.Size = info.Size()
@@ -554,11 +562,11 @@ func (a *AnalyzeService) GetCachedChildren(path string) ([]*FileEntry, bool) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func dirSizeCtx(ctx context.Context, path string) int64 {
-	return dirSizeRecursive(ctx, path)
+func dirSizeCtx(ctx context.Context, path string, seen *sync.Map) int64 {
+	return dirSizeRecursive(ctx, path, seen)
 }
 
-func dirSizeRecursive(ctx context.Context, path string) int64 {
+func dirSizeRecursive(ctx context.Context, path string, seen *sync.Map) int64 {
 	select {
 	case <-ctx.Done():
 		return 0
@@ -572,12 +580,15 @@ func dirSizeRecursive(ctx context.Context, path string) int64 {
 
 	var size int64
 	for _, e := range entries {
+		fp := filepath.Join(path, e.Name())
 		if e.IsDir() {
-			size += dirSizeRecursive(ctx, filepath.Join(path, e.Name()))
+			size += dirSizeRecursive(ctx, fp, seen)
 		} else {
 			info, err := e.Info()
 			if err == nil {
-				size += info.Size()
+				if id, ok := inodeFromInfo(info); !ok || !seenAdd(seen, id) {
+					size += info.Size()
+				}
 			}
 		}
 	}
@@ -585,10 +596,11 @@ func dirSizeRecursive(ctx context.Context, path string) int64 {
 }
 
 func dirSize(path string) int64 {
-	return dirSizeRecursive(context.Background(), path)
+	var seen sync.Map
+	return dirSizeRecursive(context.Background(), path, &seen)
 }
 
-func shallowDirSizeDeep(ctx context.Context, path string, levels int) int64 {
+func shallowDirSizeDeep(ctx context.Context, path string, levels int, seen *sync.Map) int64 {
 	if levels <= 0 {
 		return 0
 	}
@@ -603,12 +615,15 @@ func shallowDirSizeDeep(ctx context.Context, path string, levels int) int64 {
 	}
 	var size int64
 	for _, e := range entries {
+		fp := filepath.Join(path, e.Name())
 		if e.IsDir() {
-			size += shallowDirSizeDeep(ctx, filepath.Join(path, e.Name()), levels-1)
+			size += shallowDirSizeDeep(ctx, fp, levels-1, seen)
 		} else {
 			info, err := e.Info()
 			if err == nil {
-				size += info.Size()
+				if id, ok := inodeFromInfo(info); !ok || !seenAdd(seen, id) {
+					size += info.Size()
+				}
 			}
 		}
 	}
