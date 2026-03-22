@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build app
+        run: wails build
+
+      - name: Zip app
+        run: |
+          cd build/bin
+          ditto -c -k --keepParent macsweep.app MacSweep-${GITHUB_REF_NAME}-arm64.zip
+
+      - name: Generate sha256
+        run: |
+          cd build/bin
+          shasum -a 256 MacSweep-${GITHUB_REF_NAME}-arm64.zip > MacSweep-${GITHUB_REF_NAME}-arm64.zip.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/bin/MacSweep-${{ github.ref_name }}-arm64.zip
+            build/bin/MacSweep-${{ github.ref_name }}-arm64.zip.sha256
+          generate_release_notes: true
