@@ -2,6 +2,17 @@
 
 A macOS disk cleaner app built with [Wails](https://wails.io/) (Go backend + Svelte frontend). Analyze disk usage, clean junk files, monitor system resources, and manage operation history with restore support.
 
+## Installation
+
+Install via [Homebrew](https://brew.sh/):
+
+```bash
+brew tap Ashish1101/tap
+brew install --cask macsweep
+```
+
+Or download the latest `.app` bundle directly from [Releases](https://github.com/Ashish1101/mac_sweep/releases).
+
 ## Prerequisites
 
 - [Go](https://go.dev/dl/) 1.21+
