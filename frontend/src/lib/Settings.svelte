@@ -1,9 +1,14 @@
 <script>
   import { onMount } from 'svelte';
   import { CheckFullDiskAccess, OpenFullDiskAccessSettings } from '../../wailsjs/go/main/App.js';
+  import { BrowserOpenURL } from '../../wailsjs/runtime/runtime.js';
   import { fdaStatus } from '../stores/permissions.js';
   import { settings } from '../stores/settings.js';
   import { previewSound } from '../stores/sound.js';
+
+  function openLink(url) {
+    BrowserOpenURL(url);
+  }
 
   let activeTab = 'general';
   let fdaChecking = false;
@@ -229,7 +234,12 @@
               <span class="link-label">Built with</span>
               <span class="link-value">Wails + Svelte + Go</span>
             </div>
+            <div class="about-link">
+              <span class="link-label">Sponsored by</span>
+              <span class="link-value clickable" on:click={() => openLink('https://progfin.com/')}>Progfin</span>
+            </div>
           </div>
+          <p class="about-made">Made with <span class="heart">❤</span> by <span class="clickable" on:click={() => openLink('https://github.com/Ashish1101')}>Ashish</span></p>
         </div>
       {/if}
     </div>
@@ -475,5 +485,26 @@
   .link-value {
     color: var(--text-secondary);
     font-size: 13px;
+  }
+
+  .about-made {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 16px;
+  }
+
+  .about-made .heart {
+    color: #e74c3c;
+    font-size: 15px;
+  }
+
+  .clickable {
+    color: var(--accent);
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  .clickable:hover {
+    text-decoration: underline;
   }
 </style>
